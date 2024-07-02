@@ -20,3 +20,4 @@ adj_type: 'pre'
 hyper_parameters: ["learning_rate", "ssl_temp", "ssl_alpha", "reg"]
 mask_p: [0.1,0.9]
 # mask_p: [0.4,0.4,0.2]
+soup_type: ["uniform","greedy"]
