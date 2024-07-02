@@ -9,9 +9,9 @@ import torch.nn.functional as F
 from common.abstract_recommender import MultiModalEndtoEndRecommender
 
 
-class MMGCL_ete(MultiModalEndtoEndRecommender):
+class AdapterSoup(MultiModalEndtoEndRecommender):
     def __init__(self, config, dataset):
-        super(MMGCL_ete, self).__init__(config, dataset)
+        super(AdapterSoup, self).__init__(config, dataset)
         self.config = config
         self.item_embeddings = None
         self.user_embeddings = None
@@ -57,21 +57,7 @@ class MMGCL_ete(MultiModalEndtoEndRecommender):
         sp_adj = self.convert_to_laplacian_mat(self.ui_interaction)
         self.norm_adj = self.convert_sparse_mat_to_tensor(sp_adj).to(self.device)
 
-        if self.config["ssl_task"] == "ED+MM+CN":
-            self.ssl_temp = self.config["ssl_temp"]
-            self.dropout_rate = self.config["dropout_rate"]
-            self.dropout = nn.Dropout(p=self.dropout_rate)
-            self.ssl_criterion = nn.CrossEntropyLoss()
-            self.p_vat = self.config['mask_p']
-
-        elif self.config["ssl_task"] in ["ED+MM", "ED", "MM"]:
-            self.ssl_criterion = nn.CrossEntropyLoss()
-            self.ssl_temp = self.config["ssl_temp"]
-            self.dropout_rate = self.config["dropout_rate"]
-            self.dropout = nn.Dropout(p=self.dropout_rate)
-            self.p_vat = self.config['mask_p']
-
-    def sgl_encoder(self, user_emb, item_emb, perturbed_adj=None):
+    def graph_adapter(self, user_emb, item_emb, perturbed_adj=None):
         ego_embeddings = torch.cat([user_emb, item_emb], 0)
         all_embeddings = [ego_embeddings]
         for k in range(self.n_layers):
@@ -140,13 +126,13 @@ class MMGCL_ete(MultiModalEndtoEndRecommender):
                 dropped_adj.append(self.random_graph_augment())
         return dropped_adj
 
-    def modality_edge_dropout_emb(self, u_ids, pos_ids, neg_ids):
+    def modality_emb(self, u_ids, pos_ids, neg_ids):
         users_emb = self.embedding_user.weight
         items_emb = self.embedding_item.weight
         v_dense = self.v_dense_emb
         if self.config["dataset"] == "kwai":
             v_dense = self.v_dense_emb
-        elif self.config["dataset"] == "sports" or "baby" or "elec" or "clothing":
+        elif self.config["dataset"] == "sports" or "baby" or "elec" or "clothing" or "pantry":
             v_dense = self.v_dense_emb
             t_dense = self.t_dense_emb
         else:
@@ -166,7 +152,7 @@ class MMGCL_ete(MultiModalEndtoEndRecommender):
             items_sub = self.read_item(torch.cat([i_emb_i_sub, v_emb_i_sub], dim=1))
             neg_items_sub = self.embedding_item_after_GCN(torch.cat([i_emb_i_sub, v_emb_neg_i_sub], dim=1))
 
-        elif self.config["dataset"] == "sports" or "baby" or "elec" or "clothing":
+        elif self.config["dataset"] == "sports" or "baby" or "elec" or "clothing" or "pantry":
             t_emb_u_sub, t_emb_i_sub = self.sgl_encoder(users_emb, t_dense, perturbed_adj)
             t_emb_u_sub, t_emb_i_sub, t_emb_neg_i_sub = t_emb_u_sub[u_ids], t_emb_i_sub[pos_ids], t_emb_i_sub[neg_ids]
 
@@ -193,92 +179,8 @@ class MMGCL_ete(MultiModalEndtoEndRecommender):
 
         return users_sub, items_sub, neg_items_sub
 
-    def modality_masking_emb(self, u_ids, pos_ids, neg_ids, p_vat):
-        users_emb = self.embedding_user.weight
-        items_emb = self.embedding_item.weight
-        v_dense = self.v_dense_emb
-        if self.config["dataset"] == "kwai":
-            v_dense = self.v_dense_emb
-        elif self.config["dataset"] == "sports" or "baby" or "elec" or "clothing":
-            v_dense = self.v_dense_emb
-            t_dense = self.t_dense_emb
-        elif self.config["dataset"] == "tiktok":
-            v_dense = self.v_dense_emb
-            a_dense = self.a_dense_emb
-            t_dense = self.t_dense_emb
-
-        # p value for masking certain modality
-        perturbed_adj = self.graph_reconstruction(aug_type=1)
-        if self.config["dataset"] == "kwai":
-            v_emb_u_sub, v_emb_i_sub = self.sgl_encoder(users_emb, v_dense, perturbed_adj)
-            i_emb_u_sub, i_emb_i_sub = self.sgl_encoder(users_emb, items_emb)
-
-            i_emb_u_sub, i_emb_i_sub, i_emb_neg_i_sub = i_emb_u_sub[u_ids], i_emb_i_sub[pos_ids], i_emb_i_sub[neg_ids]
-            v_emb_u_sub, v_emb_i_sub, v_emb_neg_i_sub = v_emb_u_sub[u_ids], v_emb_i_sub[pos_ids], v_emb_i_sub[neg_ids]
-
-            users_sub = self.read_user(torch.cat([i_emb_u_sub, v_emb_u_sub], dim=1))
-            items_sub = self.read_item(torch.cat([i_emb_i_sub, v_emb_i_sub], dim=1))
-            neg_items_sub = self.read_item(torch.cat([i_emb_i_sub, v_emb_neg_i_sub], dim=1))
-
-        elif self.config["dataset"] == "sports" or "baby" or "elec" or "clothing":
-            modalities = ["image", "text"]
-            modality_index = np.random.choice(len(modalities), p=p_vat)
-            modality = modalities[modality_index]
-            if modality == "image":
-                v_emb_u_sub, v_emb_i_sub = self.sgl_encoder(users_emb, v_dense, perturbed_adj)
-                i_emb_u_sub, i_emb_i_sub = self.sgl_encoder(users_emb, items_emb)
-                t_emb_u_sub, t_emb_i_sub = self.sgl_encoder(users_emb, t_dense)
-            elif modality == "text":
-                t_emb_u_sub, t_emb_i_sub = self.sgl_encoder(users_emb, v_dense, perturbed_adj)
-                i_emb_u_sub, i_emb_i_sub = self.sgl_encoder(users_emb, items_emb)
-                v_emb_u_sub, v_emb_i_sub = self.sgl_encoder(users_emb, t_dense)
-
-            i_emb_u_sub, i_emb_i_sub, i_emb_neg_i_sub = i_emb_u_sub[u_ids], i_emb_i_sub[pos_ids], i_emb_i_sub[neg_ids]
-            v_emb_u_sub, v_emb_i_sub, v_emb_neg_i_sub = v_emb_u_sub[u_ids], v_emb_i_sub[pos_ids], v_emb_i_sub[neg_ids]
-            t_emb_u_sub, t_emb_i_sub, t_emb_neg_i_sub = t_emb_u_sub[u_ids], t_emb_i_sub[pos_ids], t_emb_i_sub[neg_ids]
-
-            users_sub = self.read_user(torch.cat([i_emb_u_sub, v_emb_u_sub, t_emb_u_sub], dim=1))
-            items_sub = self.read_item(torch.cat([i_emb_i_sub, v_emb_i_sub, t_emb_i_sub], dim=1))
-            # choose certain modality to replace with negative emb
-            neg_items_sub = self.read_item(torch.cat([i_emb_i_sub, v_emb_neg_i_sub, t_emb_neg_i_sub], dim=1))
-
-        elif self.config["dataset"] == "tiktok":
-            modalities = ["image", "text", "audio"]
-            modality_index = np.random.choice(len(modalities), p=p_vat)
-            modality = modalities[modality_index]
-            if modality == "image":
-                v_emb_u_sub, v_emb_i_sub = self.sgl_encoder(users_emb, v_dense, perturbed_adj)
-                i_emb_u_sub, i_emb_i_sub = self.sgl_encoder(users_emb, items_emb)
-                a_emb_u_sub, a_emb_i_sub = self.sgl_encoder(users_emb, a_dense)
-                t_emb_u_sub, t_emb_i_sub = self.sgl_encoder(users_emb, t_dense)
-            elif modality == "audio":
-                a_emb_u_sub, a_emb_i_sub = self.sgl_encoder(users_emb, v_dense, perturbed_adj)
-                i_emb_u_sub, i_emb_i_sub = self.sgl_encoder(users_emb, items_emb)
-                v_emb_u_sub, v_emb_i_sub = self.sgl_encoder(users_emb, a_dense)
-                t_emb_u_sub, t_emb_i_sub = self.sgl_encoder(users_emb, t_dense)
-            else:
-                t_emb_u_sub, t_emb_i_sub = self.sgl_encoder(users_emb, v_dense, perturbed_adj)
-                i_emb_u_sub, i_emb_i_sub = self.sgl_encoder(users_emb, items_emb)
-                a_emb_u_sub, a_emb_i_sub = self.sgl_encoder(users_emb, a_dense)
-                v_emb_u_sub, v_emb_i_sub = self.sgl_encoder(users_emb, t_dense)
-
-            i_emb_u_sub, i_emb_i_sub, i_emb_neg_i_sub = i_emb_u_sub[u_ids], i_emb_i_sub[pos_ids], i_emb_i_sub[neg_ids]
-            v_emb_u_sub, v_emb_i_sub, v_emb_neg_i_sub = v_emb_u_sub[u_ids], v_emb_i_sub[pos_ids], v_emb_i_sub[neg_ids]
-            a_emb_u_sub, a_emb_i_sub, a_emb_neg_i_sub = a_emb_u_sub[u_ids], a_emb_i_sub[pos_ids], a_emb_i_sub[neg_ids]
-            t_emb_u_sub, t_emb_i_sub, t_emb_neg_i_sub = t_emb_u_sub[u_ids], t_emb_i_sub[pos_ids], t_emb_i_sub[neg_ids]
-
-            users_sub = self.read_user(torch.cat([i_emb_u_sub, v_emb_u_sub, a_emb_u_sub, t_emb_u_sub], dim=1))
-            items_sub = self.read_item(torch.cat([i_emb_i_sub, v_emb_i_sub, a_emb_i_sub, t_emb_i_sub], dim=1))
-            neg_items_sub = self.read_item(torch.cat([i_emb_i_sub, v_emb_i_sub, a_emb_i_sub, t_emb_neg_i_sub], dim=1))
-
-        users_sub = F.normalize(users_sub, dim=1)
-        items_sub = F.normalize(items_sub, dim=1)
-        neg_items_sub = F.normalize(neg_items_sub, dim=1)
-
-        return users_sub, items_sub, neg_items_sub
-
-    def cal_multiview_MM_ED_CN(self, users, pos_items, neg_items):
-        if self.config["ssl_task"] == "ED+MM":
+    def cal_multiview_general(self, users, pos_items, neg_items):
+        if self.config["ssl_task"] == "general":
             users_sub_1, items_sub_1, _ = self.modality_edge_dropout_emb(users, pos_items, neg_items)
             users_sub_2, items_sub_2, _ = self.modality_masking_emb(users, pos_items, neg_items, self.p_vat)
 
@@ -295,7 +197,7 @@ class MMGCL_ete(MultiModalEndtoEndRecommender):
 
             return ssl_loss
 
-        elif self.config["ssl_task"] == "ED+MM+CN":
+        elif self.config["ssl_task"] == "mdr":
             users_sub_1, items_sub_1, neg_items_sub_1 = self.modality_edge_dropout_emb(users, pos_items, neg_items)
             users_sub_2, items_sub_2, neg_items_sub_2 = self.modality_masking_emb(users, pos_items, neg_items,
                                                                                   self.p_vat)
@@ -378,7 +280,7 @@ class MMGCL_ete(MultiModalEndtoEndRecommender):
 
             return ssl_loss
 
-        elif self.config["ssl_task"] == "ED":
+        elif self.config["ssl_task"] == "general":
             users_sub_1, items_sub_1, _ = self.modality_edge_dropout_emb(users, pos_items, neg_items)
             users_sub_2, items_sub_2, _ = self.modality_edge_dropout_emb(users, pos_items, neg_items)
 
