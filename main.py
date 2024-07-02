@@ -61,6 +61,6 @@ if __name__ == '__main__':
 
 
 
-    quick_start(model=args.model, dataset=args.dataset, config_dict=config_dict, save_model=True)
-
+quick_start(model=args.model, dataset=args.dataset, config_dict=config_dict,
+                save_model=True, use_soup=args.use_soup, model_paths=args.model_paths)
 
