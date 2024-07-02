@@ -11,9 +11,9 @@ from torchscale.component.embedding import (
     VisionEmbedding,
 )
 # from torchscale.component.multiway_network import MutliwayEmbedding
-from models.beit3.multiway_network import MutliwayEmbedding
+from models.LLaVA.multiway_network import MutliwayEmbedding
 
-class BEiT3(nn.Module):
+class LLaVA(nn.Module):
     def __init__(self, args, **kwargs):
         super().__init__()
         self.args = args
