@@ -11,7 +11,7 @@ from common.abstract_recommender import MultiModalEndtoEndRecommender
 
 class AdapterSoup(MultiModalEndtoEndRecommender):
     def __init__(self, config, dataset):
-        super(AdapterSoup, self).__init__(config, dataset)
+        super(AdapterSoup, self).__init__(config, dataset, pretrained_path=None, use_soup=False)
         self.config = config
         self.item_embeddings = None
         self.user_embeddings = None
@@ -29,6 +29,11 @@ class AdapterSoup(MultiModalEndtoEndRecommender):
         self.ui_interaction = dataset.inter_matrix(form='csr').astype(np.float32)
         self.__init_mm_feature(dataset)
 
+            if pretrained_path and use_soup:
+            self.load_soup(pretrained_path)
+
+    def load_soup(self, paths):
+        self = uniform_soup(self, paths, device=self.device) 
     #         self.device = torch.device('cpu')
 
     def __init_mm_feature(self, dataset):
